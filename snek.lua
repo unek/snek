@@ -1,4 +1,3 @@
-local Buffer = require("buffer")
 local Object = require("classic")
 
 local net = require("net")
@@ -8,7 +7,7 @@ function Snek:new(x, y, dir)
   self.direction = love.math.random(0, 3)
   self.next_direction = self.direction
 
-  self.maxlength = 8
+  self.max_length = 8
 
   self.dead = false
   self.stopped = false
@@ -23,66 +22,48 @@ function Snek:new(x, y, dir)
   }
 end
 
-function Snek.fromBuffer(buf)
+function Snek.fromMessage(message)
   local self = Snek()
-  -- read basic information
-  self.direction = buf:readUInt8(0)
-  self.next_direction = buf:readUInt8(1)
-  self.maxlength = buf:readUInt16LE(2)
-  self.id = buf:readUInt16LE(4)
+  self.id = message.id
+  self.name = message.name
 
-  self.dead = buf:readUInt8(6) == 1
-  self.stopped = buf:readUInt8(7) == 1
+  self.direction = message.direction
+  self.next_direction = message.next_direction
+  self.max_length = message.max_length
 
-  self.speed = buf:readUInt8(8)
-  self.last_move = buf:readUInt8(9)
+  self.dead = message.dead
+  self.stopped = message.stopped
 
-  -- block data
-  local nblocks = buf:readUInt16LE(10)
-  self.blocks = {}
-  for i = 0, nblocks - 1, 2 do
-    local x = tonumber(buf:readInt16LE(12 + i * 2))
-    local y = tonumber(buf:readInt16LE(12 + (i + 1) * 2))
-    table.insert(self.blocks, {x = x, y = y})
-  end
+  self.speed = message.speed
+  self.last_move = message.last_move
 
-  -- looks info
-  local r = buf:readUInt8(12 + #self.blocks * 4 )
-  local g = buf:readUInt8(12 + #self.blocks * 4 + 1)
-  local b = buf:readUInt8(12 + #self.blocks * 4 + 2)
-  self.color = {r, g, b}
+  self.blocks = message.blocks
+
+  --self.color = {message.color.r, message.color.g, message.color.b}
 
   return self
 end
 
-function Snek:toBuffer()
-  local buf = Buffer.new(12 + (#self.blocks + 1) * 2 * 2 + 1)
-  -- basic info
-  buf:writeUInt8(self.direction, 0)
-  buf:writeUInt8(self.next_direction, 1)
-  buf:writeUInt16LE(self.maxlength, 2)
-  buf:writeUInt16LE(self.id, 4)
+local messagesSchema = require('schemas.messages_capnp')
+function Snek:toMessage()
+  return messagesSchema.Snek.serialize({
+    id = self.id,
+    name = self.name,
 
-  buf:writeUInt8(self.dead and 1 or 0, 6)
-  buf:writeUInt8(self.stopped and 1 or 0, 7)
+    direction = self.direction,
+    next_direction = self.next_direction,
+    max_length = self.max_length,
 
-  buf:writeUInt8(self.speed, 8)
-  buf:writeUInt8(self.last_move, 9)
+    dead = self.dead,
+    stopped = self.stopped,
 
-  buf:writeUInt16LE(#self.blocks, 10)
+    speed = self.speed,
+    last_move = self.last_move,
 
-  local i = 12
-  for _, block in ipairs(self.blocks) do
-    buf:writeInt16LE(block.x, i)
-    i = i + 2
-    buf:writeInt16LE(block.y, i)
-    i = i + 2
-  end
-  buf:writeUInt8(self.color[1], i)
-  buf:writeUInt8(self.color[2], i + 1)
-  buf:writeUInt8(self.color[3], i + 2)
+    blocks = self.blocks,
 
-  return buf
+    color = {r = self.color[1], g = self.color[2], b = self.color[3]}
+  })
 end
 
 function Snek:tick()
@@ -114,7 +95,7 @@ function Snek:tick()
     x = x - 1
   end
 
-  if #self.blocks >= self.maxlength then
+  if #self.blocks >= self.max_length then
     table.remove(self.blocks, 1)
   end
 
@@ -154,12 +135,14 @@ function Snek:turn(dir)
   if server then
     if self.dead then return end
     if not self.stopped and self.next_direction ~= self.direction then return end 
-    if not self.stopped and (dir + 2) % 4 == self.direction then return end 
+    if not self.stopped and (dir + 2) % 4 == self.direction then return end
 
-    local buf = Buffer.new(4)
-    buf:writeUInt16LE(self.id, 0)
-    buf:writeUInt8(dir, 2)
-    server:broadcast(net.commands.TURN, buf)
+    local data = messagesSchema.Message.Turn.serialize({
+      id = self.id,
+      direction = dir
+    })
+
+    server:broadcast("TURN", data)
 
     self.next_direction = dir
   end
@@ -171,10 +154,11 @@ end
 function Snek:die()
   self.dead = true
   if server then
-    local buf = Buffer.new(3)
-    buf:writeUInt16LE(self.id, 0)
+    local data = messagesSchema.Message.Die.serialize({
+      id = self.id
+    })
 
-    server:broadcast(net.commands.DIE, buf)
+    server:broadcast("DIE", data)
   end
 
   if client then
@@ -186,10 +170,11 @@ end
 function Snek:stop()
   self.stopped = not self.stopped
   if server then
-    local buf = Buffer.new(3)
-    buf:writeUInt16LE(self.id, 0)
+    local data = messagesSchema.Message.Stop.serialize({
+      id = self.id
+    })
 
-    server:broadcast(net.commands.STOP, buf)
+    server:broadcast("STOP", data)
   end
 end
 

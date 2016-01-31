@@ -1,23 +1,11 @@
-local net = {}
-
-net.commands = {
-  TICK     = 0x01,
-  HELLO    = 0x10,
-  CHAT     = 0x11,
-
-  ADD_SNEK = 0x20,
-  REMOVE_SNEK = 0x21,
-  RESPAWN  = 0x22,
-  TURN     = 0x23,
-  RESIZE   = 0x24,
-  DIE      = 0x25,
-  STOP     = 0x26
-}
+local net = {}  
 
 local Object = require("classic")
 local EventEmitter = require("eventemitter")
 
 local lube = require("lib.lube")
+
+local messagesSchema = require("schemas.messages_capnp")
 
 -- local instance of a server
 net.Server = EventEmitter:extend()
@@ -46,10 +34,16 @@ function net.Server:new(ip, port)
   self.server.callbacks.recv = function(data, clientid)
     local client = self.clients[clientid]
 
-    local command = string.byte(data:sub(0, 1))
-    local buf     = Buffer.new(data:sub(2))
+    -- todo: pcall
+    local message = messagesSchema.Message.parse(data)
 
-    self:emit("receive", client, command, buf)
+    -- decompress the data if needed
+    local data = message.message
+    if message.compressed then
+      data = love.math.decompress(data)
+    end
+
+    self:emit("receive", client, message.type, data)
   end
 end
 
@@ -57,9 +51,14 @@ function net.Server:update(dt)
   self.server:update(dt)
 end
 
-function net.Server:broadcast(command, buf)
-  local buf = buf and buf:toString() or ""
-  self.server:send(string.char(command) .. buf)
+function net.Server:broadcast(type, data, compressed)
+  local message = messagesSchema.Message.serialize({
+    type = type,
+    message = data,
+    compressed = compressed
+  })
+
+  self.server:send(message)
 end
 
 -- client on a local server
@@ -69,13 +68,18 @@ function net.Player:new(server, clientid)
   self.clientid = clientid
 end
 
-function net.Player:disconnect(weknow)
+function net.Player:disconnect()
 
 end
 
-function net.Player:send(command, buf)
-  local buf = buf and buf:toString() or ""
-  self.server.server:send(string.char(command) .. buf, self.clientid)
+function net.Player:send(type, data, compressed)
+  local message = messagesSchema.Message.serialize({
+    type = type,
+    message = data,
+    compressed = compressed
+  })
+
+  self.server.server:send(message)
 end
 
 function net.Player:misbehave(val)
@@ -102,10 +106,16 @@ function net.Client:new(ip, port)
   end
 
   self.client.callbacks.recv = function(data)
-    local command = string.byte(data:sub(0, 1))
-    local buf     = Buffer.new(data:sub(2))
+    -- todo: pcall
+    local message = messagesSchema.Message.parse(data)
 
-    self:emit("receive", command, buf)
+    -- decompress the data if needed
+    local data = message.message
+    if message.compressed then
+      data = love.math.decompress(data)
+    end
+
+    self:emit("receive", message.type, data)
   end
 end
 
@@ -113,9 +123,14 @@ function net.Client:update(dt)
   self.client:update(dt)
 end
 
-function net.Client:send(command, buf)
-  local buf = buf and buf:toString() or ""
-  self.client:send(string.char(command) .. buf)
+function net.Client:send(type, data, compressed)
+  local message = messagesSchema.Message.serialize({
+    type = type,
+    message = data,
+    compressed = compressed
+  })
+
+  self.client:send(message)
 end
 
 

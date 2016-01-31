@@ -1,6 +1,5 @@
 local args = {...}
 
-local Buffer = require("buffer")
 local net = require("net")
 
 local Snek = require("snek")
@@ -10,28 +9,25 @@ love.timer = love.timer or require("love.timer")
 love.math  = love.math  or require("love.math")
 love.math.setRandomSeed(os.time() * 2.3)
 
-local commands = {}
-commands[net.commands.HELLO] = function(client, buf)
+local messagesSchema = require('schemas.messages_capnp')
+
+local messages = {}
+messages.HELLO = function(client, data)
   if client.nickname then
     client:misbehave()
     return
   end
 
-  local r = buf:readUInt8(0)
-  local g = buf:readUInt8(1)
-  local b = buf:readUInt8(2)
-
-  local nickname = buf:toString("ascii", 3)
-
-  client.nickname = nickname
-  client.color = {r, g, b}
+  local message = messagesSchema.Message.Hello.parse(data)
+  client.nickname = message.nickname
+  client.color = {255, 0, 0}
 
   -- send him all the sneks
   for i, snek in pairs(game.sneks) do
-    client:send(net.commands.ADD_SNEK, snek:toBuffer())
+    client:send("ADD_SNEK", snek:toMessage())
   end
 end
-commands[net.commands.RESPAWN] = function(client)
+messages.RESPAWN = function(client)
   if not client.nickname then
     client:misbehave()
     return
@@ -47,23 +43,23 @@ commands[net.commands.RESPAWN] = function(client)
     end
   end
 end
-commands[net.commands.TURN] = function(client, buf)
-  local side = buf:readUInt8(0)
+messages.TURN = function(client, data)
+  local message = messagesSchema.Message.Turn.parse(data)
 
   if not client.snek then
     client:misbehave()
     return
   end
 
-  client.snek:turn(side)
+  client.snek:turn(message.direction)
 end
-commands[net.commands.CHAT] = function(client, buf)
+messages.CHAT = function(client, data)
   if not client.nickname then
     client:misbehave()
     return
   end
 
-  server:broadcast(net.commands.CHAT, Buffer.new(string.format("%s: %s", client.nickname, buf:toString())))
+  -- todo
 end
 
 game = {}
@@ -76,13 +72,14 @@ end
 
 local sneks = 0
 function game.removeSnek(id)
-  local buf = Buffer.new(3)
-  buf:writeUInt16LE(id, 0)
-
   game.sneks[id].client.snek = nil
   game.sneks[id] = nil
 
-  server:broadcast(net.commands.REMOVE_SNEK, buf)
+  -- todo: make a schema for removesnek, not sure why it's not there
+  local data = messagesSchema.Message.Respawn.serialize({
+    id = id
+  })
+  server:broadcast("REMOVE_SNEK", data)
 end
 
 function game.spawnSnek(client)
@@ -95,11 +92,12 @@ function game.spawnSnek(client)
 
   game.sneks[snek.id] = snek
 
-  server:broadcast(net.commands.ADD_SNEK, snek:toBuffer())
+  server:broadcast("ADD_SNEK", snek:toMessage())
 
-  local buf = Buffer.new(3)
-  buf:writeUInt16LE(snek.id, 0)
-  client:send(net.commands.RESPAWN, buf)
+  local data = messagesSchema.Message.Respawn.serialize({
+    id = snek.id
+  })
+  client:send("RESPAWN", data)
 
   return snek
 end
@@ -109,7 +107,7 @@ function game.tick()
     snek:tick()
   end
 
-  server:broadcast(net.commands.TICK)
+  server:broadcast("TICK")
 end
 
 function game.collide(self, x, y)
@@ -138,8 +136,8 @@ server = net.Server("0.0.0.0", args[1])
 server:on("connect", function(self, client)
 
 end)
-server:on("receive", function(self, client, command, buf)
-  commands[command](client, buf)
+server:on("receive", function(self, client, command, data)
+  messages[command](client, data)
 end)
 
 local dt = 0

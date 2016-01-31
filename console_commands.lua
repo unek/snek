@@ -1,4 +1,5 @@
 local net = require("net")
+local messagesSchema = require("schemas.messages_capnp")
 
 -- but i'm not a rapper
 local function wrapper(f)
@@ -50,17 +51,15 @@ console.defineCommand("connect", "connects to a server", function(ip, port)
 
   client = net.Client(ip or "localhost", port or 14970)
 
-  local buf = Buffer.new(3 + #nickname)
-  buf:writeUInt8(255, 0) -- r 
-  buf:writeUInt8(0, 1) -- g
-  buf:writeUInt8(0, 2) -- b
+  local data = messagesSchema.Message.Hello.serialize({
+    nickname = nickname,
+    version = 1
+  })
 
-  --buf:write(nickname, 3) -- nickname
+  client:send("HELLO", data)
 
-  client:send(net.commands.HELLO, buf)
-
-  client:on("receive", function(self, command, buf)
-    commands[command](buf)
+  client:on("receive", function(self, command, data)
+    messages[command](data)
   end)
   client:once("connect", function(self)
     console.i("connected")
@@ -107,44 +106,47 @@ end)
 console.defineCommand("say", "sends a chat message", function(...)
   local msg = table.concat({...}, " ")
 
-  client:send(net.commands.CHAT, Buffer.new(msg))
+  -- todo
 end)
 
 -- gameplay commands
 console.defineCommand("respawn", "respawns the snek", wrapper(function()
   assert(client, "not connected")
 
-  client:send(net.commands.RESPAWN)
+  client:send("RESPAWN")
 end))
 console.defineCommand("up", "moves snek up", wrapper(function()
   assert(client, "not connected")
 
-  local buf = Buffer.new(2)
-  buf:writeUInt8(0, 0)
+  local data = messagesSchema.Message.Turn.serialize({
+    direction = 0
+  })
 
-  client:send(net.commands.TURN, buf)
+  client:send("TURN", data)
 end))
 console.defineCommand("down", "moves snek down", wrapper(function()
   assert(client, "not connected")
 
-  local buf = Buffer.new(2)
-  buf:writeUInt8(2, 0)
+  local data = messagesSchema.Message.Turn.serialize({
+    direction = 2
+  })
 
-  client:send(net.commands.TURN, buf)
+  client:send("TURN", data)
 end))
 console.defineCommand("left", "moves snek left", wrapper(function()
   assert(client, "not connected")
 
-  local buf = Buffer.new(2)
-  buf:writeUInt8(3, 0)
+  local data = messagesSchema.Message.Turn.serialize({
+    direction = 3
+  })
 
-  client:send(net.commands.TURN, buf)
+  client:send("TURN", data)
 end))
 console.defineCommand("right", "moves snek right", wrapper(function()
   assert(client, "not connected")
 
-  local buf = Buffer.new(2)
-  buf:writeUInt8(1, 0)
+  local data = messagesSchema.Message.Turn.serialize({
+    direction = 1
+  })
 
-  client:send(net.commands.TURN, buf)
-end))
+  client:send("TURN", data)end))

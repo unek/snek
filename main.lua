@@ -1,4 +1,3 @@
-local Buffer = require("buffer")
 local Object = require("classic")
 Snek = require("snek")
 
@@ -9,52 +8,54 @@ require("console_commands")
 
 camera = require("camera")()
 
-commands = {}
-commands[net.commands.TICK] = function()
+local messagesSchema = require("schemas.messages_capnp")
+messages = {}
+messages.TICK = function()
   for i, snek in pairs(sneks) do
     snek:tick()
   end
 end
-commands[net.commands.RESPAWN] = function(buf)
-  local id = buf:readUInt16LE(0)
+messages.RESPAWN = function(data)
+  local message = messagesSchema.Message.Respawn.parse(data)
 
-  me = id
+  me = message.id
   camera:followEntity(sneks[me])
 
   console.i("my id is %d", me)
 end
-commands[net.commands.ADD_SNEK] = function(buf)
-  local snek = Snek.fromBuffer(buf)
+messages.ADD_SNEK = function(data)
+  local message = messagesSchema.Snek.parse(data)
+  local snek = Snek.fromMessage(message)
+
   sneks[snek.id] = snek
 end
-commands[net.commands.REMOVE_SNEK] = function(buf)
-  local id = buf:readUInt16LE(0)
-  sneks[id] = nil
+messages.REMOVE_SNEK = function(data)
+  -- todo: make a schema for removesnek, not sure why it's not there
+  local message = messagesSchema.Message.Respawn.parse(data)
+  sneks[message.id] = nil
 end
-commands[net.commands.TURN] = function(buf)
-  local id = buf:readUInt16LE(0)
-  local side = buf:readUInt8(2)
+messages.TURN = function(data)
+  local message = messagesSchema.Message.Turn.parse(data)
 
-  sneks[id]:turn(side)
+  sneks[message.id]:turn(message.direction % 4)
 end
-commands[net.commands.RESIZE] = function(buf)
-  local id = buf:readUInt16LE(0)
-  local size = buf:readUInt16LE(2)
+messages.RESIZE = function(data)
+  local message = messagesSchema.Message.Resize.parse(data)
 
-  sneks[id].maxlength = size
+  sneks[message.id].max_length = message.size
 end
-commands[net.commands.DIE] = function(buf)
-  local id = buf:readUInt16LE(0)
+messages.DIE = function(data)
+  local message = messagesSchema.Message.Die.parse(data)
 
-  sneks[id]:die()
+  sneks[message.id]:die()
 end
-commands[net.commands.STOP] = function(buf)
-  local id = buf:readUInt16LE(0)
+messages.STOP = function(data)
+  local message = messagesSchema.Message.Stop.parse(data)
 
-  sneks[id]:stop()
+  sneks[message.id]:stop()
 end
-commands[net.commands.CHAT] = function(buf)
-  console.i("chat: %s", buf:toString())
+messages.CHAT = function(data)
+  -- todo
 end
 
 me = nil
